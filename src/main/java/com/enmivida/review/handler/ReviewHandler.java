@@ -2,16 +2,17 @@ package com.enmivida.review.handler;
 
 import com.enmivida.review.domain.Review;
 import com.enmivida.review.exception.ReviewDataException;
-import com.enmivida.review.exception.ReviewNotFoundException;
 import com.enmivida.review.repository.ReviewReactiveRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 import javax.validation.ConstraintViolation;
 import javax.validation.Validator;
@@ -25,6 +26,7 @@ import java.util.stream.Collectors;
 public class ReviewHandler {
     private final ReviewReactiveRepository repository;
     private final Validator validator;
+    private Sinks.Many<Review> reviewSink = Sinks.many().replay().latest();
 
     public Mono<ServerResponse> hello(ServerRequest request) {
         return ServerResponse.ok().bodyValue("helloworld2");
@@ -35,6 +37,7 @@ public class ReviewHandler {
                 .doOnNext(this::validate)
                 //.flatMap(review -> repository.save(review))
                 .flatMap(repository::save)
+                .doOnNext(review -> reviewSink.tryEmitNext(review))
                 //.flatMap(savedReview -> ServerResponse.status(HttpStatus.CREATED).bodyValue(savedReview))
                 .flatMap(ServerResponse.status(HttpStatus.CREATED)::bodyValue)
                 ;
@@ -91,5 +94,13 @@ public class ReviewHandler {
                     .collect(Collectors.joining(","));
             throw new ReviewDataException(errorMessage);
         }
+    }
+
+    public Mono<ServerResponse> getReviewsStream(ServerRequest request) {
+        return ServerResponse.ok()
+                .contentType(MediaType.APPLICATION_NDJSON)
+                .body(reviewSink.asFlux(), Review.class)
+                .log()
+                ;
     }
 }
